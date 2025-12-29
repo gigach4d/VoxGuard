@@ -95,7 +95,7 @@ module packet_manager (
     // --- Output Logic ---
     always @(*) begin
         next_state = state;
-        dac_data_out = 0;
+			
         dac_data_valid = 0;
         spi_tx_start = 0;
         spi_tx_data = 0;
@@ -165,7 +165,6 @@ module packet_manager (
                 if (rx_assembly == SYNC_WORD) begin
                     sync_en = 1; // Reset RX Chaos
                 end else begin
-                    dac_data_out = decrypt_data_in;
                     dac_data_valid = 1;
                     next_key_en = 1;
                 end
@@ -174,5 +173,24 @@ module packet_manager (
             
             default: next_state = IDLE;
         endcase
+    end
+	 // ==========================================
+    // NEW: Audio Output Latch (Fixes Silence Bug)
+    // ==========================================
+    always @(posedge clk) begin
+        if (rst) begin
+            dac_data_out   <= 0;
+            dac_data_valid <= 0;
+        end else begin
+            // 1. If we have new decrypted audio, update the output AND HOLD IT
+            if (state == RX_PROCESS) begin
+                dac_data_out   <= decrypt_data_in;
+                dac_data_valid <= 1; // Tell I2S "We have sound"
+            end
+            
+            // Optional: You can clear 'valid' if you want to implement a complex handshake,
+            // but for a walkie-talkie, keeping it HIGH ensures the last sample
+            // is repeated if the radio lags (filling silence).
+        end
     end
 endmodule
