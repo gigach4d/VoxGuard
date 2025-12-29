@@ -12,7 +12,7 @@ for k = 2:N
 end
 
 audio_int = int16(input * 2^15);
-key_int = int16(x * (2^16-1) - 2^15); 
+key_int = int16(x * (2^16-1) - 2^15);
 
 cipher = bitxor(audio_int, key_int);
 audiowrite('encrypted.wav', double(cipher)/2^15, fs);
@@ -42,7 +42,7 @@ corr_enc = corrcoef(orig, enc);
 fprintf('Correlation (input vs. encrypted): %.4f\n', corr_enc(1,2));
 
 figure;
-histogram(enc, 100);
+hist(enc, 100);
 title('Histogram of Encrypted Audio');
 xlabel('Encrypted Value');
 ylabel('Count');
