@@ -75,8 +75,8 @@ module top_level (
         .next_key_en(next_key_en), .sync_en(sync_en), .sync_state_out(sync_state)
     );
 
-    assign encrypted_tx_word = (tx_payload_data == 16'hCAFE) ? tx_payload_data : (tx_payload_data ^ key_stream[31:16]);
-    assign final_decrypted_audio = rx_payload_data ^ key_stream[31:16];
+    assign encrypted_tx_word = (tx_payload_data == 16'hCAFE) ? tx_payload_data : (tx_payload_data ^ key_stream[27:12]);
+    assign final_decrypted_audio = rx_payload_data ^ key_stream[27:12];
 
     chaotic_generator cg_inst (
         .clk(clk), .rst(rst),
