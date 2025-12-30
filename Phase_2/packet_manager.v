@@ -95,8 +95,6 @@ module packet_manager (
     // --- Output Logic ---
     always @(*) begin
         next_state = state;
-			
-        dac_data_valid = 0;
         spi_tx_start = 0;
         spi_tx_data = 0;
         sync_en = 0;
@@ -165,7 +163,6 @@ module packet_manager (
                 if (rx_assembly == SYNC_WORD) begin
                     sync_en = 1; // Reset RX Chaos
                 end else begin
-                    dac_data_valid = 1;
                     next_key_en = 1;
                 end
                 next_state = IDLE;

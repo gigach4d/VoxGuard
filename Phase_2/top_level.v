@@ -15,11 +15,12 @@ module top_level (
     inout  wire  spi_sdio_pin,
     
     // Debug
-    output wire led_sync
+    // Debug Output (Maps to the 8 LEDs on your board)
+    output wire [7:0] leds
 );
 
     wire rst;
-    assign rst = ~rst_n;
+    assign rst = rst_n;
 
     wire [15:0] dac_data;
     wire        dac_valid, dac_ready;
@@ -38,8 +39,6 @@ module top_level (
     wire [31:0] key_stream;
     wire        next_key_en, sync_en;
     wire [31:0] sync_state;
-
-    assign led_sync = sync_en;
 
     // MCLK Generation
     reg [1:0] mclk_counter;
@@ -92,4 +91,50 @@ module top_level (
         .spi_sclk_pin(spi_sclk_pin),
         .spi_sdio_pin(spi_sdio_pin)
     );
+	 // =========================================================================
+    // VISUAL DEBUG LOGIC (Pulse Stretchers)
+    // =========================================================================
+    
+    // 1. Heartbeat Counter (Blinks LED 0 to prove Clock is running)
+    // 23 bits count to ~8 million. At 12MHz, bit 23 toggles every ~0.7 seconds.
+    reg [23:0] heartbeat_cnt;
+    always @(posedge clk) begin
+        heartbeat_cnt <= heartbeat_cnt + 1;
+    end
+
+    // 2. Sync Pulse Stretcher (Makes LED 2 flash visibly when 0xCAFE is found)
+    reg [22:0] sync_timer;
+    always @(posedge clk) begin
+        if (sync_en) 
+            sync_timer <= 23'h7FFFFF; // Load max value (flash for ~0.3s)
+        else if (sync_timer > 0) 
+            sync_timer <= sync_timer - 1;
+    end
+
+    // 3. Audio Activity Stretcher (Makes LED 3 flash when audio packets arrive)
+    reg [22:0] audio_timer;
+    always @(posedge clk) begin
+        if (adc_valid || dac_valid) 
+            audio_timer <= 23'h7FFFFF;
+        else if (audio_timer > 0) 
+            audio_timer <= audio_timer - 1;
+    end
+
+    // --- LED MAPPING ---
+    // LED 0: Heartbeat (Should blink slowly ALWAYS)
+    assign leds[0] = heartbeat_cnt[23]; 
+    
+    // LED 1: PTT Status (Lights up when you press button)
+    assign leds[1] = push_to_talk;      
+    
+    // LED 2: Sync Detected (Flashes when RX hears "Hello")
+    assign leds[2] = (sync_timer > 0);  
+    
+    // LED 3: Audio Moving (Flashes when talking/receiving)
+    assign leds[3] = (audio_timer > 0); 
+    
+    // LED 4: Error/Reset Indicator (Lights up if Reset is held)
+    assign leds[4] = rst;
+
+    assign leds[7:5] = 0; // Unused
 endmodule
