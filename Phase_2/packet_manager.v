@@ -13,7 +13,7 @@ module packet_manager (
     // SPI Transceiver Interface
     output reg spi_tx_start,
     output reg [7:0] spi_tx_data,
-    input  wire spi_tx_busy,      
+    input  wire spi_tx_busy,   
     input  wire [7:0] spi_rx_data,
     input  wire spi_rx_done,      
     
@@ -29,7 +29,6 @@ module packet_manager (
     output reg sync_en,
     output reg [31:0] sync_state_out
 );
-
     // State Encoding
     localparam IDLE = 0,
                TX_PREPARE_PREAMBLE = 1,
@@ -38,17 +37,16 @@ module packet_manager (
                TX_WAIT_HIGH = 4,
                TX_SEND_LOW = 5,
                TX_WAIT_LOW = 6,
-               RX_WAIT_LOW_BYTE = 7,
-               RX_PROCESS = 8;
+               // RX States
+               RX_WAIT_AUDIO_HIGH = 7,
+               RX_WAIT_AUDIO_LOW = 8,
+               RX_SAVE_AUDIO = 9; 
 
     reg [3:0] state, next_state;
-    
     reg [15:0] tx_latch;
     reg [15:0] rx_assembly;
     reg        tx_is_preamble;
-    
-    // NEW: Latch to hold audio stable between IDLE and TX_PREPARE_AUDIO
-    reg [15:0] raw_audio_latch; 
+    reg [15:0] raw_audio_latch;
 
     localparam [15:0] SYNC_WORD = 16'hCAFE;
     localparam [31:0] RESET_SEED = 32'h01F97414;
@@ -66,33 +64,27 @@ module packet_manager (
         end else begin
             state <= next_state;
 
-            // Latch Raw Audio in IDLE when valid
-            if (state == IDLE && adc_data_valid) begin
+            // Latch Raw Audio for TX
+            if (state == IDLE && adc_data_valid) 
                 raw_audio_latch <= adc_data_in;
-            end
 
-            // Latch Encrypted Data from Top Level
+            // Latch Encrypted TX Data
             if (state == TX_PREPARE_PREAMBLE || state == TX_PREPARE_AUDIO) begin
                 tx_latch <= tx_data_in;
-                if (state == TX_PREPARE_PREAMBLE)
-                    tx_is_preamble <= 1;
-                else
-                    tx_is_preamble <= 0;
+                if (state == TX_PREPARE_PREAMBLE) tx_is_preamble <= 1;
+                else tx_is_preamble <= 0;
             end
 
-            // Latch RX Data
+            // RX Sliding Window: Shift in bytes whenever they arrive
             if (!push_to_talk) begin
-                if (state == IDLE && spi_rx_done) begin
-                   rx_assembly[15:8] <= spi_rx_data; // High Byte
-                end
-                if (state == RX_WAIT_LOW_BYTE && spi_rx_done) begin
-                   rx_assembly[7:0] <= spi_rx_data;  // Low Byte
+                if (spi_rx_done) begin
+                    rx_assembly <= {rx_assembly[7:0], spi_rx_data};
                 end
             end
         end
     end
 
-    // --- Output Logic ---
+    // --- Combinatorial Logic ---
     always @(*) begin
         next_state = state;
         spi_tx_start = 0;
@@ -105,38 +97,36 @@ module packet_manager (
         case (state)
             IDLE: begin
                 if (push_to_talk) begin
-                    // TX Mode
+                    // TX LOGIC
                     if (adc_data_valid) begin
                         encrypt_data_out = SYNC_WORD; 
-                        sync_en = 1'b1; // Reset TX Chaos
+                        sync_en = 1'b1; 
                         next_state = TX_PREPARE_PREAMBLE;
                     end
                 end else begin
-                    // RX Mode
-                    if (spi_rx_done) begin
-                        next_state = RX_WAIT_LOW_BYTE;
+                    // RX LOGIC: Check Sliding Window
+                    if (rx_assembly == SYNC_WORD) begin
+                        sync_en = 1; // Found Header
+                        next_state = RX_WAIT_AUDIO_HIGH; 
                     end
                 end
             end
 
-            // BUG FIX: Drive encrypt_data_out during PREPARE states
+            // --- TX STATES ---
             TX_PREPARE_PREAMBLE: begin
-                encrypt_data_out = SYNC_WORD; // Must hold valid for encryption
+                encrypt_data_out = SYNC_WORD;
                 next_state = TX_SEND_HIGH;
             end
-
             TX_PREPARE_AUDIO: begin
-                encrypt_data_out = raw_audio_latch; // Must hold valid for encryption
+                encrypt_data_out = raw_audio_latch;
                 next_state = TX_SEND_HIGH;
             end
-
             TX_SEND_HIGH: begin
                 spi_tx_data = tx_latch[15:8];
                 spi_tx_start = 1;
                 next_state = TX_WAIT_HIGH;
             end
             TX_WAIT_HIGH: if (!spi_tx_busy) next_state = TX_SEND_LOW;
-
             TX_SEND_LOW: begin
                 spi_tx_data = tx_latch[7:0];
                 spi_tx_start = 1;
@@ -144,50 +134,42 @@ module packet_manager (
             end
             TX_WAIT_LOW: begin
                 if (!spi_tx_busy) begin
-                    if (tx_is_preamble) begin
-                        // Don't set encrypt_data_out here; wait for PREPARE state
-                        next_state = TX_PREPARE_AUDIO;
-                    end else begin
-                        next_state = IDLE;
-                    end
+                    if (tx_is_preamble) next_state = TX_PREPARE_AUDIO;
+                    else next_state = IDLE;
                 end
             end
 
-            RX_WAIT_LOW_BYTE: begin
+            // --- RX STATES ---
+            RX_WAIT_AUDIO_HIGH: begin
+                if (spi_rx_done) next_state = RX_WAIT_AUDIO_LOW;
+            end
+
+            RX_WAIT_AUDIO_LOW: begin
                 if (spi_rx_done) begin
-                    next_state = RX_PROCESS;
+                    // Wait 1 cycle for Low Byte to shift into rx_assembly
+                    next_state = RX_SAVE_AUDIO; 
                 end
             end
 
-            RX_PROCESS: begin
-                if (rx_assembly == SYNC_WORD) begin
-                    sync_en = 1; // Reset RX Chaos
-                end else begin
-                    next_key_en = 1;
-                end
+            RX_SAVE_AUDIO: begin
                 next_state = IDLE;
             end
             
             default: next_state = IDLE;
         endcase
     end
-	 // ==========================================
-    // NEW: Audio Output Latch (Fixes Silence Bug)
-    // ==========================================
+
+    // --- Audio Output Latch ---
     always @(posedge clk) begin
         if (rst) begin
             dac_data_out   <= 0;
             dac_data_valid <= 0;
         end else begin
-            // 1. If we have new decrypted audio, update the output AND HOLD IT
-            if (state == RX_PROCESS) begin
-                dac_data_out   <= decrypt_data_in;
-                dac_data_valid <= 1; // Tell I2S "We have sound"
+            // Update output ONLY when data is fully assembled (Save State)
+            if (state == RX_SAVE_AUDIO) begin
+                dac_data_out   <= decrypt_data_in; 
+                dac_data_valid <= 1; 
             end
-            
-            // Optional: You can clear 'valid' if you want to implement a complex handshake,
-            // but for a walkie-talkie, keeping it HIGH ensures the last sample
-            // is repeated if the radio lags (filling silence).
         end
     end
 endmodule

@@ -9,7 +9,6 @@ module chaotic_generator #(
     input  wire [DATA_WIDTH-1:0] sync_state_in, 
     output wire [DATA_WIDTH-1:0] key_out     
 );
-
     localparam [DATA_WIDTH-1:0] ONE     = 32'h10000000;
     localparam [DATA_WIDTH-1:0] P_PARAM = 32'h07333333; 
     localparam [DATA_WIDTH-1:0] MULT_1  = 32'h238E38E3;
@@ -25,7 +24,7 @@ module chaotic_generator #(
     
     reg [2*DATA_WIDTH-1:0] mult_res_1;
     reg [2*DATA_WIDTH-1:0] mult_res_2;
-
+    
     reg [15:0] lfsr_reg;
     reg        lfsr_feedback;
 

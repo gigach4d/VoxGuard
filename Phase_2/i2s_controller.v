@@ -1,5 +1,5 @@
 module i2s_controller #(
-    parameter SYS_CLK_FREQ = 50_000_000, 
+    parameter SYS_CLK_FREQ = 12_000_000, 
     parameter SAMPLE_RATE  = 44_100,     
     parameter DATA_WIDTH   = 16
 ) (
@@ -15,6 +15,7 @@ module i2s_controller #(
     input  wire i2s_sdata_in,
     output reg i2s_sdata_out
 );
+    // 12MHz / 44.1k / 32 bits = ~8.5 -> 8 clocks per bit. Div = 4.
     localparam BCLK_DIV = (SYS_CLK_FREQ / (SAMPLE_RATE * 2 * DATA_WIDTH)) / 2;
     reg [7:0] bclk_counter;
     
@@ -22,11 +23,12 @@ module i2s_controller #(
     reg [DATA_WIDTH*2-1:0] rx_shift_reg;
     reg [5:0] bit_counter;
 
-    // Edge Detection for BCLK
+    // Edge Detection
     reg i2s_bclk_prev;
+    wire i2s_bclk_fall;
     wire i2s_bclk_rise;
 
-    // Generate BCLK (Toggle)
+    // 1. Generate BCLK
     always @(posedge clk) begin
         if (rst) begin
             bclk_counter <= 0;
@@ -41,49 +43,58 @@ module i2s_controller #(
         end
     end
 
-    // Detect Rising Edge of BCLK to synchronize logic
-    always @(posedge clk) begin
-        i2s_bclk_prev <= i2s_bclk;
-    end
-    assign i2s_bclk_rise = (i2s_bclk && !i2s_bclk_prev);
+    // 2. Detect Edges
+    always @(posedge clk) i2s_bclk_prev <= i2s_bclk;
+    assign i2s_bclk_fall = (!i2s_bclk && i2s_bclk_prev); // 1->0
+    assign i2s_bclk_rise = (i2s_bclk && !i2s_bclk_prev); // 0->1
 
-    // Main I2S Logic (Runs once per BCLK rising edge)
+    // 3. TX Logic (Drive on FALLING Edge)
     always @(posedge clk) begin
         if (rst) begin
             bit_counter <= 0;
-            i2s_lrclk <= 0;
+            i2s_lrclk <= 1; // Start High (Right channel usually)
             dac_ready <= 0;
-            adc_data_valid <= 0;
             tx_shift_reg <= 0;
-            rx_shift_reg <= 0;
             i2s_sdata_out <= 0;
-            adc_data_out <= 0;
-        end else if (i2s_bclk_rise) begin  // <--- FIXED: Only run on rising edge
-            if (bit_counter == (DATA_WIDTH * 2) - 1) begin
-                i2s_lrclk <= ~i2s_lrclk;
+        end else if (i2s_bclk_fall) begin
+            // Frame Logic
+            if (bit_counter == DATA_WIDTH - 1) begin
+                i2s_lrclk <= ~i2s_lrclk; // Toggle Frame
                 bit_counter <= 0;
-                dac_ready <= 1; 
+                
+                // Load TX Data at start of new frame
+                dac_ready <= 1;
                 if (dac_data_valid) begin
-                    tx_shift_reg <= {dac_data_in, dac_data_in};
+                    tx_shift_reg <= {dac_data_in, dac_data_in}; // Stereo Copy
                     dac_ready <= 0;
                 end
             end else begin
                 bit_counter <= bit_counter + 1;
             end
-            
-            // Output data (MSB first)
+
+            // Output Data (MSB First)
             i2s_sdata_out <= tx_shift_reg[DATA_WIDTH*2-1];
             tx_shift_reg <= tx_shift_reg << 1;
-            
-            // Input data (Shift in)
+        end
+    end
+
+    // 4. RX Logic (Sample on RISING Edge)
+    always @(posedge clk) begin
+        if (rst) begin
+            adc_data_out <= 0;
+            adc_data_valid <= 0;
+            rx_shift_reg <= 0;
+        end else if (i2s_bclk_rise) begin
+            // Shift In Input Bit
             rx_shift_reg <= {rx_shift_reg[DATA_WIDTH*2-2:0], i2s_sdata_in};
-            
-            // Capture ADC word when complete
-            if (bit_counter == (DATA_WIDTH*2)-2) begin
-                 adc_data_out <= rx_shift_reg[DATA_WIDTH-1:0];
-                 adc_data_valid <= 1;
+
+            // Latch at End of Frame
+            if (bit_counter == DATA_WIDTH - 1) begin
+                // Capture the full shifted word
+                adc_data_out <= {rx_shift_reg[DATA_WIDTH-2:0], i2s_sdata_in};
+                adc_data_valid <= 1;
             end else begin
-                 adc_data_valid <= 0;
+                adc_data_valid <= 0;
             end
         end
     end
