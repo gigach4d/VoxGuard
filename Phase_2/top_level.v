@@ -16,7 +16,7 @@ module top_level (
 );
 
     wire rst;
-    assign rst = ~rst_n; 
+    assign rst = rst_n; 
 
     // Internal Signals
     wire [15:0] dac_data;
@@ -43,13 +43,13 @@ module top_level (
     // 2. Audio Controller
     i2s_controller #( .SYS_CLK_FREQ(12000000) ) i2s_inst (
         .clk(clk), .rst(rst),
-        .dac_data_in(dac_data), .dac_data_valid(dac_valid), .dac_ready(dac_ready),
+        .dac_data_in(adc_data), .dac_data_valid(adc_valid), .dac_ready(dac_ready),
         .adc_data_out(adc_data), .adc_data_valid(adc_valid),
         .i2s_bclk(i2s_bclk), .i2s_lrclk(i2s_lrclk),
         .i2s_sdata_in(i2s_sdata_in), .i2s_sdata_out(i2s_sdata_out)
     );
 
-    // 3. Packet Manager
+    /*// 3. Packet Manager
     packet_manager pm_inst (
         .clk(clk), .rst(rst), .push_to_talk(push_to_talk),
         .dac_data_out(dac_data), .dac_data_valid(dac_valid), .dac_ready(dac_ready),
@@ -61,7 +61,7 @@ module top_level (
         .spi_rx_assembled(rx_payload_data), 
         .decrypt_data_in(final_decrypted_audio),
         .next_key_en(next_key_en), .sync_en(sync_en), .sync_state_out(sync_state)
-    );
+    );*/
 
     // 4. Crypto Logic
     assign encrypted_tx_word = (tx_payload_data == 16'hCAFE) ? tx_payload_data : (tx_payload_data ^ key_stream[27:12]);

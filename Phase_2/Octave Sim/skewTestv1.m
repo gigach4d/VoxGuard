@@ -112,11 +112,10 @@ subplot(3,1,3);
 hist(cipher, 256); title('Histogram: Encrypted Audio');
 
 % [NEW] FIGURE 3: Chaotic Map Evolution
-figure('Name', 'Chaotic Map Analysis');
+figure();
 
 % Subplot 1: Return Map (x_n+1 vs x_n)
 % This proves the hardware is implementing a Skew Tent Map
-subplot(2,1,1);
 hold on;
 % Plot the theoretical Skew Tent shape for reference
 p_float = double(P_PARAM) / double(ONE);
@@ -129,9 +128,9 @@ ylabel('Next State (x_{n+1})');
 legend('Theoretical Skew Tent', 'Simulated States');
 grid on; axis square;
 
+figure();
 % Subplot 2: Time Series (First 100 samples)
 % Shows the sensitive dependence on initial conditions
-subplot(2,1,2);
 plot(x_history(1:100), 'r.-', 'LineWidth', 1);
 title('Chaotic Orbit Evolution (First 100 Iterations)');
 xlabel('Iteration Number (n)');
