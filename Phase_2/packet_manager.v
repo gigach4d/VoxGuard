@@ -1,174 +1,171 @@
+`timescale 1ns / 1ps
+
 module packet_manager (
     input wire clk,
     input wire rst,
-    input wire push_to_talk, 
+    input wire push_to_talk,
     
-    // I2S Interface
-    output reg [15:0] dac_data_out,
-    output reg dac_data_valid,
-    input  wire dac_ready,
-    input  wire [15:0] adc_data_in,
-    input  wire adc_data_valid,
+    // TX FIFO Interface (From Mic)
+    input  wire [15:0] tx_fifo_dout,
+    input  wire tx_fifo_empty,
+    output reg  tx_fifo_rd_en,
+    
+    // RX FIFO Interface (To Speaker)
+    output reg [15:0] rx_fifo_din,
+    output reg  rx_fifo_wr_en,
+    input  wire rx_fifo_full,
     
     // SPI Transceiver Interface
-    output reg spi_tx_start,
-    output reg [7:0] spi_tx_data,
+    output reg  spi_tx_start,
+    output reg  [7:0] spi_tx_data,
     input  wire spi_tx_busy,   
+    
     input  wire [7:0] spi_rx_data,
-    input  wire spi_rx_done,      
-    
-    // Encryption/Decryption Interface
-    output reg [15:0] encrypt_data_out, 
-    input  wire [15:0] tx_data_in,       
-    
-    output wire [15:0] spi_rx_assembled, 
-    input  wire [15:0] decrypt_data_in,  
-    
-    // Chaotic Generator Interface
-    output reg next_key_en,
-    output reg sync_en,
-    output reg [31:0] sync_state_out
+    input  wire spi_rx_done
 );
-    // State Encoding
-    localparam IDLE = 0,
-               TX_PREPARE_PREAMBLE = 1,
-               TX_PREPARE_AUDIO = 2,
-               TX_SEND_HIGH = 3,
-               TX_WAIT_HIGH = 4,
-               TX_SEND_LOW = 5,
-               TX_WAIT_LOW = 6,
-               // RX States
-               RX_WAIT_AUDIO_HIGH = 7,
-               RX_WAIT_AUDIO_LOW = 8,
-               RX_SAVE_AUDIO = 9; 
-
-    reg [3:0] state, next_state;
-    reg [15:0] tx_latch;
-    reg [15:0] rx_assembly;
-    reg        tx_is_preamble;
-    reg [15:0] raw_audio_latch;
 
     localparam [15:0] SYNC_WORD = 16'hCAFE;
-    localparam [31:0] RESET_SEED = 32'h01F97414;
 
-    assign spi_rx_assembled = rx_assembly;
+    // --- Chaotic Encryption Integration ---
+    wire [31:0] chaos_key;
+    reg next_key_en;
+    reg sync_en;
+    
+    chaotic_generator cipher (
+        .clk(clk),
+        .rst(rst),
+        .next_key_en(next_key_en),
+        .sync_en(sync_en),
+        .sync_state_in(32'h01F97414), // Default reset seed
+        .key_out(chaos_key)
+    );
 
-    // --- State Sequencer ---
+    // --- State Machine ---
+    localparam IDLE = 0,
+               TX_SYNC_H = 1, TX_WAIT_SH = 2, TX_SYNC_L = 3, TX_WAIT_SL = 4,
+               TX_POP = 5, TX_ENCRYPT = 6, 
+               TX_DATA_H = 7, TX_WAIT_DH = 8, TX_DATA_L = 9, TX_WAIT_DL = 10,
+               RX_WAIT_H = 11, RX_WAIT_L = 12, RX_DECRYPT = 13;
+               
+    reg [3:0] state;
+    reg [15:0] tx_buffer;
+    reg [15:0] rx_buffer;
+    reg [15:0] rx_sliding_window;
+    
+    // Timeout counter to reset RX if SPI connection drops
+    reg [15:0] rx_idle_cnt;
+
     always @(posedge clk) begin
         if (rst) begin
             state <= IDLE;
-            tx_latch <= 0;
-            rx_assembly <= 0;
-            tx_is_preamble <= 0;
-            raw_audio_latch <= 0;
+            spi_tx_start <= 0;
+            tx_fifo_rd_en <= 0;
+            rx_fifo_wr_en <= 0;
+            next_key_en <= 0;
+            sync_en <= 0;
+            rx_idle_cnt <= 0;
+            rx_sliding_window <= 0;
         end else begin
-            state <= next_state;
-
-            // Latch Raw Audio for TX
-            if (state == IDLE && adc_data_valid) 
-                raw_audio_latch <= adc_data_in;
-
-            // Latch Encrypted TX Data
-            if (state == TX_PREPARE_PREAMBLE || state == TX_PREPARE_AUDIO) begin
-                tx_latch <= tx_data_in;
-                if (state == TX_PREPARE_PREAMBLE) tx_is_preamble <= 1;
-                else tx_is_preamble <= 0;
-            end
-
-            // RX Sliding Window: Shift in bytes whenever they arrive
-            if (!push_to_talk) begin
-                if (spi_rx_done) begin
-                    rx_assembly <= {rx_assembly[7:0], spi_rx_data};
-                end
-            end
-        end
-    end
-
-    // --- Combinatorial Logic ---
-    always @(*) begin
-        next_state = state;
-        spi_tx_start = 0;
-        spi_tx_data = 0;
-        sync_en = 0;
-        sync_state_out = RESET_SEED;
-        encrypt_data_out = 0; 
-        next_key_en = 0;
-
-        case (state)
-            IDLE: begin
-                if (push_to_talk) begin
-                    // TX LOGIC
-                    if (adc_data_valid) begin
-                        encrypt_data_out = SYNC_WORD; 
-                        sync_en = 1'b1; 
-                        next_state = TX_PREPARE_PREAMBLE;
-                    end
-                end else begin
-                    // RX LOGIC: Check Sliding Window
-                    if (rx_assembly == SYNC_WORD) begin
-                        sync_en = 1; // Found Header
-                        next_state = RX_WAIT_AUDIO_HIGH; 
-                    end
-                end
-            end
-
-            // --- TX STATES ---
-            TX_PREPARE_PREAMBLE: begin
-                encrypt_data_out = SYNC_WORD;
-                next_state = TX_SEND_HIGH;
-            end
-            TX_PREPARE_AUDIO: begin
-                encrypt_data_out = raw_audio_latch;
-                next_state = TX_SEND_HIGH;
-            end
-            TX_SEND_HIGH: begin
-                spi_tx_data = tx_latch[15:8];
-                spi_tx_start = 1;
-                next_state = TX_WAIT_HIGH;
-            end
-            TX_WAIT_HIGH: if (!spi_tx_busy) next_state = TX_SEND_LOW;
-            TX_SEND_LOW: begin
-                spi_tx_data = tx_latch[7:0];
-                spi_tx_start = 1;
-                next_state = TX_WAIT_LOW;
-            end
-            TX_WAIT_LOW: begin
-                if (!spi_tx_busy) begin
-                    if (tx_is_preamble) next_state = TX_PREPARE_AUDIO;
-                    else next_state = IDLE;
-                end
-            end
-
-            // --- RX STATES ---
-            RX_WAIT_AUDIO_HIGH: begin
-                if (spi_rx_done) next_state = RX_WAIT_AUDIO_LOW;
-            end
-
-            RX_WAIT_AUDIO_LOW: begin
-                if (spi_rx_done) begin
-                    // Wait 1 cycle for Low Byte to shift into rx_assembly
-                    next_state = RX_SAVE_AUDIO; 
-                end
-            end
-
-            RX_SAVE_AUDIO: begin
-                next_state = IDLE;
-            end
+            // Default Pulses
+            spi_tx_start <= 0;
+            tx_fifo_rd_en <= 0;
+            rx_fifo_wr_en <= 0;
+            next_key_en <= 0;
+            sync_en <= 0;
             
-            default: next_state = IDLE;
-        endcase
-    end
+            // RX Timeout Logic
+            if (spi_rx_done) rx_idle_cnt <= 0;
+            else if (rx_idle_cnt < 16'hFFFF) rx_idle_cnt <= rx_idle_cnt + 1;
+            
+            // RX Sliding Window Hunt (Always active in IDLE/RX modes)
+            if (spi_rx_done) rx_sliding_window <= {rx_sliding_window[7:0], spi_rx_data};
 
-    // --- Audio Output Latch ---
-    always @(posedge clk) begin
-        if (rst) begin
-            dac_data_out   <= 0;
-            dac_data_valid <= 0;
-        end else begin
-            // Update output ONLY when data is fully assembled (Save State)
-            if (state == RX_SAVE_AUDIO) begin
-                dac_data_out   <= decrypt_data_in; 
-                dac_data_valid <= 1; 
+            if (push_to_talk) begin
+                // ==========================================
+                // TRANSMIT MODE (TX)
+                // ==========================================
+                case (state)
+                    IDLE: begin
+                        // Wait until we have some audio data before broadcasting
+                        if (!tx_fifo_empty) begin
+                            sync_en <= 1; // Reset encryption key for new transmission
+                            state <= TX_SYNC_H;
+                        end
+                    end
+                    // 1. Send SYNC Preamble
+                    TX_SYNC_H: if (!spi_tx_busy) begin spi_tx_data <= SYNC_WORD[15:8]; spi_tx_start <= 1; state <= TX_WAIT_SH; end
+                    TX_WAIT_SH: if (!spi_tx_busy && !spi_tx_start) state <= TX_SYNC_L;
+                    TX_SYNC_L: if (!spi_tx_busy) begin spi_tx_data <= SYNC_WORD[7:0]; spi_tx_start <= 1; state <= TX_WAIT_SL; end
+                    TX_WAIT_SL: if (!spi_tx_busy && !spi_tx_start) state <= TX_POP;
+                    
+                    // 2. Process Audio
+                    TX_POP: begin
+                        if (!tx_fifo_empty) begin
+                            tx_fifo_rd_en <= 1; // Pop FWFT FIFO
+                            state <= TX_ENCRYPT;
+                        end else begin
+                            state <= IDLE; // Buffer empty, restart preamble next time
+                        end
+                    end
+                    TX_ENCRYPT: begin
+                        tx_buffer <= tx_fifo_dout ^ chaos_key[15:0]; // Encrypt
+                        next_key_en <= 1; // Advance chaos sequence
+                        state <= TX_DATA_H;
+                    end
+                    TX_DATA_H: if (!spi_tx_busy) begin spi_tx_data <= tx_buffer[15:8]; spi_tx_start <= 1; state <= TX_WAIT_DH; end
+                    TX_WAIT_DH: if (!spi_tx_busy && !spi_tx_start) state <= TX_DATA_L;
+                    TX_DATA_L: if (!spi_tx_busy) begin spi_tx_data <= tx_buffer[7:0]; spi_tx_start <= 1; state <= TX_WAIT_DL; end
+                    TX_WAIT_DL: if (!spi_tx_busy && !spi_tx_start) state <= TX_POP; // Loop back for next sample
+                    
+                    default: state <= IDLE;
+                endcase
+                
+            end else begin
+                // ==========================================
+                // RECEIVE MODE (RX)
+                // ==========================================
+                
+                // PRIORITY CHECK: Always hunt for the Sync Word (CAFE)
+                // If we see it, FORCE a reset, no matter what state we are in.
+                if (rx_sliding_window == SYNC_WORD) begin
+                    sync_en <= 1;           // Reset Decryption Engine
+                    rx_sliding_window <= 0; // Clear window to prevent double-trigger
+                    state <= RX_WAIT_H;     // Align to expect High Byte next
+                end
+                
+                // Standard State Machine
+                else begin
+                    case (state)
+                        IDLE: begin
+                            // Just waiting for the Sync Word (handled above)
+                        end
+                        
+                        RX_WAIT_H: begin
+                            if (rx_idle_cnt == 16'hFFFF) state <= IDLE; // Connection dropped
+                            else if (spi_rx_done) begin
+                                rx_buffer[15:8] <= spi_rx_data;
+                                state <= RX_WAIT_L;
+                            end
+                        end
+                        
+                        RX_WAIT_L: begin
+                            if (rx_idle_cnt == 16'hFFFF) state <= IDLE;
+                            else if (spi_rx_done) begin
+                                rx_buffer[7:0] <= spi_rx_data;
+                                state <= RX_DECRYPT;
+                            end
+                        end
+                        
+                        RX_DECRYPT: begin
+                            rx_fifo_din <= rx_buffer ^ chaos_key[15:0]; // Decrypt
+                            next_key_en <= 1;
+                            if (!rx_fifo_full) rx_fifo_wr_en <= 1;
+                            state <= RX_WAIT_H; // Wait for next sample
+                        end
+                        
+                        default: state <= IDLE;
+                    endcase
+                end
             end
         end
     end
