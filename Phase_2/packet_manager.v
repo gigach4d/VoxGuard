@@ -33,7 +33,7 @@ module packet_manager(
         .key_out(chaos_key)
     );
 
-    // Edge Detectors
+    // Edge Detectors for Cross-Module Timing
     reg tx_done_prev, rx_ready_prev;
     always @(posedge clk) begin
         if (rst) begin
@@ -63,7 +63,7 @@ module packet_manager(
                 tx_fifo_rd_en <= 0;
             end
             
-            // 2. Buffer Full? Send it!
+            // 2. Buffer Full? Add Preamble and Send!
             if (sample_cnt == 15 && !start_tx) begin
                 nrf_tx_data <= {16'hCAFE, buffer[239:0]}; 
                 start_tx <= 1;
@@ -91,16 +91,15 @@ module packet_manager(
             rx_fifo_wr_en <= 0;
         end else begin
             if (rx_ready_edge) begin
-                // FIX: BYPASS THE PREAMBLE CHECK! 
-                // ACCEPT EVERYTHING THE RADIO RECEIVES FOR DIAGNOSTICS
-                // if (nrf_rx_data[255:240] == 16'hCAFE) begin
+                // Check Preamble to ensure it's a valid Voxguard packet
+                if (nrf_rx_data[255:240] == 16'hCAFE) begin
                     rx_latch <= nrf_rx_data << 16; 
                     rx_ptr <= 15; 
-                // end
+                end
             end 
             
             if (rx_ptr > 0) begin
-                // Unpack and Decrypt
+                // Unpack and Decrypt Audio
                 rx_fifo_din <= rx_latch[255:240] ^ chaos_key[15:0];
                 rx_fifo_wr_en <= 1;
                 rx_latch <= rx_latch << 16;
