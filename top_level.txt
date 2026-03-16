@@ -1,0 +1,122 @@
+`timescale 1ns / 1ps
+
+module top_level (
+    input wire clk,           // 12 MHz System Clock
+    input wire rst,           // Active-High Reset (Button 0)
+    input wire push_to_talk,  // Active-High PTT (Button 1)
+
+    // Audio Physical Pins
+    output wire i2s_bclk,
+    output wire i2s_lrclk,
+    input  wire i2s_sdata_in, 
+    output wire i2s_sdata_out,
+    output wire i2s_mclk,     
+
+    // UART Inter-FPGA Comm Pins
+    output wire uart_tx,
+    input  wire uart_rx,
+
+    // DEBUG LEDS
+    output wire [3:0] led
+);
+
+    // 1. Internal Interface Wires
+    wire [15:0] adc_data;
+    wire        adc_valid;
+    wire        dac_ready;
+    
+    wire [15:0] rx_audio_data;
+    wire        rx_audio_valid;
+
+    // ------------------------------------------------------------------
+    // 2. THE WALKIE-TALKIE ROUTER (Half-Duplex Logic & Local Monitor)
+    // ------------------------------------------------------------------
+    reg [15:0] latched_audio = 0;
+    reg        latched_valid = 0;
+
+    // TX Logic: Broadcast if PTT is pressed
+    wire tx_audio_valid = adc_valid & push_to_talk;
+
+    always @(posedge clk) begin
+        if (rst) begin
+            latched_audio <= 0;
+            latched_valid <= 0;
+        end else begin
+            // DIAGNOSTIC ROUTE: If transmitting, pipe the Mic data directly to 
+            // our OWN latched_audio register so we can see it on our own LED[3].
+            if (push_to_talk) begin
+                if (adc_valid) latched_audio <= adc_data; 
+            end 
+            
+            // NORMAL ROUTE: If receiving, listen to the UART and push to the DAC
+            else begin
+                if (rx_audio_valid) begin
+                    latched_audio <= rx_audio_data;
+                    latched_valid <= 1; 
+                end
+            end
+        end
+    end
+    
+    // ------------------------------------------------------------------
+    // 3. I2S CONTROLLER INSTANTIATION (Untouched)
+    // ------------------------------------------------------------------
+    i2s_controller #( .SYS_CLK_FREQ(12000000) ) i2s_inst (
+        .clk(clk), 
+        .rst(rst),
+        .dac_data_in(latched_audio),       
+        .dac_data_valid(latched_valid),   
+        .dac_ready(dac_ready),
+        .adc_data_out(adc_data),
+        .adc_data_valid(adc_valid),
+        .i2s_bclk(i2s_bclk), 
+        .i2s_lrclk(i2s_lrclk),
+        .i2s_sdata_in(i2s_sdata_in), 
+        .i2s_sdata_out(i2s_sdata_out)
+    );
+    
+    assign i2s_mclk = clk; // The DAC PLL Override
+
+    // ------------------------------------------------------------------
+    // 4. UART SUBSYSTEM (1 Mbps)
+    // ------------------------------------------------------------------
+    uart_audio_tx tx_inst (
+        .clk(clk),
+        .rst(rst),
+        .audio_in(adc_data),
+        .audio_valid(tx_audio_valid),
+        .tx_pin(uart_tx)
+    );
+
+    uart_audio_rx rx_inst (
+        .clk(clk),
+        .rst(rst),
+        .rx_pin(uart_rx),
+        .audio_out(rx_audio_data),
+        .audio_valid(rx_audio_valid)
+    );
+
+    // ------------------------------------------------------------------
+    // 5. DIAGNOSTIC LEDS
+    // ------------------------------------------------------------------
+    reg [19:0] tx_stretch = 0;
+    reg [19:0] rx_stretch = 0;
+
+    always @(posedge clk) begin
+        if (tx_audio_valid) tx_stretch <= 20'd600_000; 
+        else if (tx_stretch > 0) tx_stretch <= tx_stretch - 1;
+
+        if (rx_audio_valid) rx_stretch <= 20'd600_000;
+        else if (rx_stretch > 0) rx_stretch <= rx_stretch - 1;
+    end
+
+    assign led[0] = push_to_talk;       
+    assign led[1] = (tx_stretch > 0);   
+    assign led[2] = (rx_stretch > 0);   
+    
+    // THE ACOUSTIC DIAGNOSTIC: Proves the data is actual audio, not zeroes
+    wire [15:0] abs_audio = latched_audio[15] ? (~latched_audio + 1) : latched_audio;
+    assign led[3] = (abs_audio > 16'h0500); 
+
+endmodule
+
