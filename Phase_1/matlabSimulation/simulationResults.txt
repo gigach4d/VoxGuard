@@ -1,0 +1,13 @@
+>> voxguard
+--- Basic Analysis ---
+MSE (decrypted vs. original): 0.000000
+Correlation (original vs. decrypted): 1.0000
+Correlation (input vs. encrypted): -0.0027
+
+--- Extended Analysis ---
+Key Sensitivity MSE: 0.305798
+Key Sensitivity Correlation: -0.0012
+Channel Noise MSE: 0.032152
+Channel Noise Correlation: 0.5016
+Sync Error MSE: 0.307349
+Sync Error Correlation: -0.0014

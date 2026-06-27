@@ -1,0 +1,39 @@
+# This file defines the Voxguard project for the FuseSoC build system.
+
+CAPI=2:
+
+# Sets the name of this "core" (project).
+name: ::voxguard:0
+
+# This section is for grouping your source files.
+filesets:
+  # The 'rtl' fileset contains all the synthesizable hardware design files.
+  rtl:
+    files:
+      - src/chaotic_generator.sv
+      - src/encrypt_decrypt.sv
+      - src/i2s_controller.sv
+      - src/spi_master.sv
+      - src/packet_manager.sv
+      - src/top_level.sv
+    file_type: systemVerilogSource
+
+  # The 'sim' fileset contains the simulation-specific C++ testbench.
+  sim:
+    files:
+      - sim/tb_voxguard.cpp
+    file_type: cppSource
+
+# This section defines what actions you can perform.
+targets:
+  # The 'sim' target describes how to run a simulation.
+  sim:
+    description: "Run Verilator simulation for the Voxguard transceiver."
+    # Use the Verilator tool.
+    tool: verilator
+    # For this target, include files from both the 'rtl' and 'sim' filesets.
+    filesets:
+      - rtl
+      - sim
+    # Tell Verilator that 'top_level' is the main module to be simulated.
+    toplevel: top_level
