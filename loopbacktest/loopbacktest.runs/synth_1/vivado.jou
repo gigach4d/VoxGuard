@@ -1,0 +1,24 @@
+#-----------------------------------------------------------
+# Vivado v2025.2 (64-bit)
+# SW Build 6299465 on Fri Nov 14 12:34:56 MST 2025
+# IP Build 6300035 on Fri Nov 14 10:48:45 MST 2025
+# SharedData Build 6298862 on Thu Nov 13 04:50:51 MST 2025
+# Start of session at: Mon Mar 23 09:16:02 2026
+# Process ID         : 6673
+# Current directory  : /home/pranav-mannatt/loopbacktest.runs/synth_1
+# Command line       : vivado -log top_level.vds -product Vivado -mode batch -messageDb vivado.pb -notrace -source top_level.tcl
+# Log file           : /home/pranav-mannatt/loopbacktest.runs/synth_1/top_level.vds
+# Journal file       : /home/pranav-mannatt/loopbacktest.runs/synth_1/vivado.jou
+# Running On         : pranav-latitude
+# Platform           : Ubuntu
+# Operating System   : Ubuntu 24.04.4 LTS
+# Processor Detail   : Intel(R) Core(TM) i5-5300U CPU @ 2.30GHz
+# CPU Frequency      : 2295.599 MHz
+# CPU Physical cores : 2
+# CPU Logical cores  : 4
+# Host memory        : 8183 MB
+# Swap memory        : 4294 MB
+# Total Virtual      : 12478 MB
+# Available Virtual  : 9737 MB
+#-----------------------------------------------------------
+source top_level.tcl -notrace

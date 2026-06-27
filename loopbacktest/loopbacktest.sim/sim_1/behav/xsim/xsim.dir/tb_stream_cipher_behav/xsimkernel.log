@@ -1,0 +1,7 @@
+Running: xsim.dir/tb_stream_cipher_behav/xsimk -simmode gui -wdb tb_stream_cipher_behav.wdb -simrunnum 0 -socket 46015
+Design successfully loaded
+Design Loading Memory Usage: 199128 KB (Peak: 199184 KB)
+Design Loading CPU Usage: 2010 ms
+Simulation completed
+Simulation Memory Usage: 281124 KB (Peak: 338396 KB)
+Simulation CPU Usage: 4650 ms

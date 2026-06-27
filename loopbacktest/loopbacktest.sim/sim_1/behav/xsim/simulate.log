@@ -1,0 +1,5 @@
+Time resolution is 1 ps
+Generating 10,000 samples. Please wait...
+Done! Saved to voxguard_sim_data.csv
+$finish called at time : 426833683330 ps : File "/home/pranav-mannatt/loopbacktest.srcs/sim_1/new/tb_stream_cipher.v" Line 81
+INFO: xsimkernel Simulation Memory Usage: 281124 KB (Peak: 338396 KB), Simulation CPU Usage: 4650 ms
